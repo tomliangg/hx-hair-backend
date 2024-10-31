@@ -1,7 +1,7 @@
 {
   "name": "hx-hair-backend",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --port 8000",
     "deploy": "wrangler deploy --minify"
   },
   "dependencies": {

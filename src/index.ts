@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { startOfWeek, endOfWeek, addDays, format } from 'date-fns';
+import { startOfWeek, endOfWeek, addDays, format, isValid } from 'date-fns';
 import { createClient } from '@supabase/supabase-js';
 
 const app = new Hono()
@@ -20,10 +20,10 @@ app.get('/appointments/week/:date', async (c) => {
 
     // 1. find existing appointments for the week
     const { data: appointments, error: appointmentsError } = await supabase
-        .from('appointments')
-        .select('*')
-        .gte('start_time', startOfWeekDate.toISOString())
-        .lte('end_time', endOfWeekDate.toISOString());
+      .from('appointments')
+      .select('*')
+      .gte('start_time', startOfWeekDate.toISOString())
+      .lte('end_time', endOfWeekDate.toISOString());
 
     //  2. create data strcture for frontend
     const weekData = [];
@@ -65,8 +65,65 @@ app.get('/appointments/week/:date', async (c) => {
 
   } catch (err) {
     console.error('Error in /appointments/week/:date API', err);
-    return c.json({ error: 'An unexpected error occured.'}, 500);
+    return c.json({ error: 'An unexpected error occured.' }, 500);
   }
-})
+});
+
+app.post('/appointments', async (c) => {
+  const { firstName, lastName, email, startTime, endTime} = await c.req.json();
+
+  // 1. validate input
+  if (!firstName || !lastName || !email || !startTime || !endTime) {
+    return c.json({ error: 'Missing required fields' }, 400);
+  }
+
+  const startTimeDate = new Date(startTime);  // cast string to date 
+  const endTimeDate = new Date(endTime);
+
+  if (!isValid(startTimeDate) || !isValid(endTimeDate)) {
+    return c.json({ error: 'Invalid date/time format' }, 400);
+  }
+
+  try {
+    // 2. check if the time slot is available
+    const { data: existingAppointments, error: appointmentError } = await supabase
+      .from('appointments')
+      .select('*')
+      .filter('start_time', 'lte', endTime)  // overlap check
+      .filter('end_time', 'gte', startTime)  // overlap check
+      .maybeSingle();
+
+    if (appointmentError) {
+      return c.json({ error: 'Failed to check appointment availablity', appointmentError }, 500);
+    }
+
+    if (existingAppointments) {
+      return c.json({ error: 'Time slot is already booked' }, 409);
+    }
+
+    // 3. insert the new appointment
+    const { data: newAppointment, error: insertError } = await supabase
+      .from('appointments')
+      .insert({
+        customer_first_name: firstName,
+        customer_last_name: lastName,
+        customer_email: email,
+        start_time: startTime,
+        end_time: endTime,
+      })
+      .single();
+
+      if (insertError) {
+        console.error("Supabase insert error:", insertError);  // Log
+        return c.json({ error: 'Failed to create appointment' }, 500);
+      }
+
+      return c.json(newAppointment, 201);
+
+  } catch (err) {
+    console.error("Error in /appointments API:", err);
+    return c.json({ error: 'An unexpected error occurred' }, 500);
+  }
+});
 
 export default app
